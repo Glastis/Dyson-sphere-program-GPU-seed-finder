@@ -1,0 +1,24 @@
+{
+    "game": {
+        "starCount": 64,
+        "resourceMultiplier": 1.0,
+        "hiveInitialColonize": 1.0,
+        "hiveMaxDensity": 1.0
+    },
+    "rule": {
+        "type": "and",
+        "rules": [
+            { "ocean": "Sulfur" },
+
+            { "gas": "Fireice", "op": "present" },
+            { "gas": "Deuterium", "op": "present" },
+
+            { "vein": "Oil", "op": "present" },
+            { "vein": "Stalagmite", "op": "present" },
+            { "vein": "Kimberlite", "op": "present" },
+            { "vein": "Fractal", "op": "present" },
+            { "vein": "Grating", "op": "present" },
+            { "vein": "Organic", "op": "present" }
+        ]
+    }
+}

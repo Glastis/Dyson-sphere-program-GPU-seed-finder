@@ -1,0 +1,6 @@
+{
+    "rule": {
+        "type": "starType",
+        "starTypes": ["BlackHole", "PurpleDwarf"]
+    }
+}

@@ -1,0 +1,25 @@
+{
+    "game": {
+        "starCount": 64,
+        "resourceMultiplier": 1.0,
+        "hiveInitialColonize": 1.0,
+        "hiveMaxDensity": 1.0
+    },
+    "rule": {
+        "type": "and",
+        "rules": [
+            {
+                "type": "or",
+                "rules": [
+                    { "type": "starType", "starTypes": ["BlackHole", "NeutronStar"] },
+                    { "type": "luminosity", "op": "gte", "value": 2.5 }
+                ]
+            },
+            { "type": "spectr", "spectr": ["O", "B"] },
+            { "type": "averageVeinAmount", "vein": "Iron", "op": "gt", "value": 150000 },
+            { "type": "planetCount", "excludeGiant": true, "op": "between", "min": 3, "max": 6 },
+            { "type": "oceanType", "oceanType": "Water" },
+            { "type": "tidalLockCount", "op": "gte", "value": 1 }
+        ]
+    }
+}
