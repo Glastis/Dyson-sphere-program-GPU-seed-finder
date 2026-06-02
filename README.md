@@ -14,6 +14,10 @@ your GPU to find the ones that have it.
 
 ## ✨ What it does
 
+<div align="center">
+<img src="docs/demo.png" alt="DSP Seed Finder live progress panel" width="640">
+</div>
+
 - 🔭 Scans the full 8-digit seed range on the **GPU** — with a CPU fallback build.
 - 🧩 A galaxy **matches** when **at least one star system** satisfies all your rules.
 - 📖 Rules are a small, **readable JSON** file: resources, star types, planets, distances…
