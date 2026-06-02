@@ -18,11 +18,6 @@ your GPU to find the ones that have it.
 <img src="docs/demo.png" alt="DSP Seed Finder live progress panel" width="640">
 </div>
 
-- 🔭 Scans the full 8-digit seed range on the **GPU** — with a CPU fallback build.
-- 🧩 A galaxy **matches** when **at least one star system** satisfies all your rules.
-- 📖 Rules are a small, **readable JSON** file: resources, star types, planets, distances…
-- ✅ Every GPU hit is **re-verified on the CPU reference** — zero false positives.
-
 It's a C / CUDA port of the Rust [DSP-Seed-Finder](https://doubleuth.github.io/DSP-Seed-Finder),
 so the **same seeds match**.
 
