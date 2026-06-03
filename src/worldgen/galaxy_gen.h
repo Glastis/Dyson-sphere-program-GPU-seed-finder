@@ -8,26 +8,133 @@
 #include "../constants/enums.h"
 #include "../constants/star_gen.h"
 #include <math.h>
+#include <stdint.h>
 
-HD static inline int check_collision(const vec3 *existing, int len, const vec3 *pt, double min_dist)
+/* --- Spatial hash grid: exact replacement for the O(n) collision scan ------
+ *
+ * Cells have side `min_dist`. Two poses collide (|p - q| < min_dist) only when
+ * their cells differ by at most 1 on every axis, so a candidate need only test
+ * the 3x3x3 = 27 cells around its own. Every pose outside that neighbourhood is
+ * provably >= min_dist away (a cell gap of 2+ on any axis forces an axis delta
+ * >= min_dist), so ignoring them cannot change the collision boolean. The cell
+ * side equals min_dist (= 2.0, an exact power-of-two divisor) so floor(coord /
+ * cell) partitions space exactly. vec3_distance_sq stays in double and is
+ * computed exactly as before, over a *superset* of the poses actually within
+ * min_dist -> the returned boolean is bit-identical to the linear scan, hence
+ * the generated galaxy is unchanged.
+ *
+ * The grid lives in per-thread local memory next to poses[], so it is kept
+ * compact: 16-bit head/next indices and a 32-bit packed cell key per pose. */
+
+#define DSP_GRID_HASH_BITS 11
+#define DSP_GRID_HASH_SIZE (1 << DSP_GRID_HASH_BITS)
+#define DSP_GRID_CELL_BITS 10
+#define DSP_GRID_CELL_MASK ((1 << DSP_GRID_CELL_BITS) - 1)
+#define DSP_GRID_CELL_OFFS 512
+
+typedef struct
+{
+    int16_t head[DSP_GRID_HASH_SIZE];
+    int16_t next[DSP_MAX_TEMP_POSES];
+    int32_t cellkey[DSP_MAX_TEMP_POSES];
+}
+pose_grid;
+
+HD static inline int grid_cell_axis(double coord, double cell)
+{
+    return (int)floor(coord / cell);
+}
+
+HD static inline int32_t grid_pack(int ix, int iy, int iz)
+{
+    int32_t kx;
+    int32_t ky;
+    int32_t kz;
+
+    kx = (ix + DSP_GRID_CELL_OFFS) & DSP_GRID_CELL_MASK;
+    ky = (iy + DSP_GRID_CELL_OFFS) & DSP_GRID_CELL_MASK;
+    kz = (iz + DSP_GRID_CELL_OFFS) & DSP_GRID_CELL_MASK;
+    return kx | (ky << DSP_GRID_CELL_BITS) | (kz << (2 * DSP_GRID_CELL_BITS));
+}
+
+HD static inline int grid_bucket(int32_t key)
+{
+    return (int)(((uint32_t)key * 2654435761u) >> (32 - DSP_GRID_HASH_BITS));
+}
+
+HD static inline void grid_reset(pose_grid *grid)
+{
+    int bucket;
+
+    bucket = 0;
+    while (bucket < DSP_GRID_HASH_SIZE)
+    {
+        grid->head[bucket] = -1;
+        ++bucket;
+    }
+}
+
+HD static inline void grid_insert(pose_grid *grid, const vec3 *pt, int index, double cell)
+{
+    int32_t key;
+    int bucket;
+
+    key = grid_pack(grid_cell_axis(pt->x, cell), grid_cell_axis(pt->y, cell), grid_cell_axis(pt->z, cell));
+    bucket = grid_bucket(key);
+    grid->cellkey[index] = key;
+    grid->next[index] = grid->head[bucket];
+    grid->head[bucket] = (int16_t)index;
+}
+
+HD static inline int grid_collision(const pose_grid *grid, const vec3 *poses, const vec3 *pt, double min_dist)
 {
     double min_dist_sq;
-    int index;
+    int cx;
+    int cy;
+    int cz;
+    int dx;
 
     min_dist_sq = min_dist * min_dist;
-    index = 0;
-    while (index < len)
+    cx = grid_cell_axis(pt->x, min_dist);
+    cy = grid_cell_axis(pt->y, min_dist);
+    cz = grid_cell_axis(pt->z, min_dist);
+    dx = -1;
+    while (dx <= 1)
     {
-        if (vec3_distance_sq(&existing[index], pt) < min_dist_sq)
+        int dy;
+
+        dy = -1;
+        while (dy <= 1)
         {
-            return 1;
+            int dz;
+
+            dz = -1;
+            while (dz <= 1)
+            {
+                int32_t key;
+                int index;
+
+                key = grid_pack(cx + dx, cy + dy, cz + dz);
+                index = grid->head[grid_bucket(key)];
+                while (index != -1)
+                {
+                    if (grid->cellkey[index] == key
+                        && vec3_distance_sq(&poses[index], pt) < min_dist_sq)
+                    {
+                        return 1;
+                    }
+                    index = grid->next[index];
+                }
+                ++dz;
+            }
+            ++dy;
         }
-        ++index;
+        ++dx;
     }
     return 0;
 }
 
-HD static inline int pose_attempt(dsp_random *rng, const vec3 *existing, int len, vec3 base,
+HD static inline int pose_attempt(dsp_random *rng, const vec3 *existing, const pose_grid *grid, vec3 base,
                                   double step_diff, double min_dist, double flatten, vec3 *out_pt)
 {
     double u;
@@ -48,12 +155,12 @@ HD static inline int pose_attempt(dsp_random *rng, const vec3 *existing, int len
     }
     mult = (r2 * step_diff + min_dist) / sqrt(d);
     *out_pt = vec3_make(base.x + u * mult, base.y + w * mult, base.z + v * mult);
-    return check_collision(existing, len, out_pt, min_dist) ? 0 : 1;
+    return grid_collision(grid, existing, out_pt, min_dist) ? 0 : 1;
 }
 
 HD static inline int poses_first_pass(dsp_random *rng, vec3 *poses, int *len, int max_count,
                                       vec3 *drunk, int *drunk_len, int drunk_num,
-                                      double step_diff, double min_dist, double flatten)
+                                      double step_diff, double min_dist, double flatten, pose_grid *grid)
 {
     int anchor;
     int attempt;
@@ -65,11 +172,12 @@ HD static inline int poses_first_pass(dsp_random *rng, vec3 *poses, int *len, in
         attempt = 0;
         while (attempt < POSES_ATTEMPTS)
         {
-            if (pose_attempt(rng, poses, *len, vec3_zero(), step_diff, min_dist, flatten, &pt))
+            if (pose_attempt(rng, poses, grid, vec3_zero(), step_diff, min_dist, flatten, &pt))
             {
                 drunk[*drunk_len] = pt;
                 ++(*drunk_len);
                 poses[*len] = pt;
+                grid_insert(grid, &poses[*len], *len, min_dist);
                 ++(*len);
                 if (*len >= max_count)
                 {
@@ -86,7 +194,7 @@ HD static inline int poses_first_pass(dsp_random *rng, vec3 *poses, int *len, in
 
 HD static inline void poses_second_pass(dsp_random *rng, vec3 *poses, int *len, int max_count,
                                         vec3 *drunk, int drunk_len,
-                                        double step_diff, double min_dist, double flatten)
+                                        double step_diff, double min_dist, double flatten, pose_grid *grid)
 {
     int round;
     int anchor;
@@ -104,10 +212,11 @@ HD static inline void poses_second_pass(dsp_random *rng, vec3 *poses, int *len, 
                 attempt = 0;
                 while (attempt < POSES_ATTEMPTS)
                 {
-                    if (pose_attempt(rng, poses, *len, drunk[anchor], step_diff, min_dist, flatten, &pt))
+                    if (pose_attempt(rng, poses, grid, drunk[anchor], step_diff, min_dist, flatten, &pt))
                     {
                         drunk[anchor] = pt;
                         poses[*len] = pt;
+                        grid_insert(grid, &poses[*len], *len, min_dist);
                         ++(*len);
                         if (*len >= max_count)
                         {
@@ -125,7 +234,7 @@ HD static inline void poses_second_pass(dsp_random *rng, vec3 *poses, int *len, 
 }
 
 HD static inline int random_poses(dsp_random *rng, vec3 *poses, int max_count,
-                                  double min_dist, double step_diff, double flatten)
+                                  double min_dist, double step_diff, double flatten, pose_grid *grid)
 {
     vec3 drunk[DSP_MAX_DRUNK];
     int drunk_len;
@@ -135,14 +244,16 @@ HD static inline int random_poses(dsp_random *rng, vec3 *poses, int max_count,
 
     len = 0;
     drunk_len = 0;
-    poses[len++] = vec3_zero();
+    poses[len] = vec3_zero();
+    grid_insert(grid, &poses[len], len, min_dist);
+    ++len;
     r1 = prng_next_f64(rng);
     drunk_num = (int)(r1 * (double)(POSES_MAX_DRUNK_NUM - POSES_MIN_DRUNK_NUM) + (double)POSES_MIN_DRUNK_NUM);
-    if (poses_first_pass(rng, poses, &len, max_count, drunk, &drunk_len, drunk_num, step_diff, min_dist, flatten))
+    if (poses_first_pass(rng, poses, &len, max_count, drunk, &drunk_len, drunk_num, step_diff, min_dist, flatten, grid))
     {
         return len;
     }
-    poses_second_pass(rng, poses, &len, max_count, drunk, drunk_len, step_diff, min_dist, flatten);
+    poses_second_pass(rng, poses, &len, max_count, drunk, drunk_len, step_diff, min_dist, flatten, grid);
     return len;
 }
 
@@ -177,11 +288,13 @@ HD static inline int trim_poses(vec3 *poses, int len, int target_count)
 HD static inline int generate_temp_poses(int seed, int target_count, vec3 *poses)
 {
     dsp_random rng;
+    pose_grid grid;
     int len;
 
     rng = prng_new(seed);
+    grid_reset(&grid);
     len = random_poses(&rng, poses, target_count * POSES_ITER_COUNT,
-                       POSES_MIN_DIST, POSES_MAX_STEP_LEN - POSES_MIN_STEP_LEN, POSES_FLATTEN);
+                       POSES_MIN_DIST, POSES_MAX_STEP_LEN - POSES_MIN_STEP_LEN, POSES_FLATTEN, &grid);
     return trim_poses(poses, len, target_count);
 }
 
