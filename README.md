@@ -33,7 +33,8 @@ file:
 ```
 
 It prints the first matching seeds and the systems that matched (`seed`, then the
-matching star indexes):
+matching star indexes under `systems` — for a proximity rule, the whole
+constellation: the anchor first, then one index per `systems[]` entry):
 
 ```
 5457	4

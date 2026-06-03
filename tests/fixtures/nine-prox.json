@@ -7,18 +7,15 @@
     },
     "rule": {
         "type": "proximity",
-        "maxDistance": 8.0,
+        "maxDistance": 1000000.0,
         "systems": [
             { "type": "birth" },
-
             {
                 "type": "and",
                 "rules": [
                     { "ocean": "Sulfur" },
-
                     { "gas": "Fireice", "op": "present" },
                     { "gas": "Deuterium", "op": "present" },
-
                     { "vein": "Oil", "op": "present" },
                     { "vein": "Stalagmite", "op": "present" },
                     { "vein": "Kimberlite", "op": "present" },
@@ -26,9 +23,7 @@
                     { "vein": "Grating", "op": "present" },
                     { "vein": "Organic", "op": "present" }
                 ]
-            },
-
-            { "vein": "Magnet", "op": "present" }
+            }
         ]
     }
 }

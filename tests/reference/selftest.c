@@ -41,6 +41,7 @@ static int full_habitable_count(int seed)
     game.seed = seed;
     generate_stars(&game, &gx);
     index = 0;
+    gx.habitable_count = 0;
     while (index < gx.star_count)
     {
         star_system sys;
@@ -49,7 +50,7 @@ static int full_habitable_count(int seed)
         sys.planet_count = 0;
         sys.used_theme_count = 0;
         get_planets(&sys);
-        star_system_load_types(&sys, &gx);
+        star_system_load_types(&sys, &gx, &gx.habitable_count);
         ++index;
     }
     return gx.habitable_count;
@@ -85,7 +86,7 @@ static void test_seed0_golden(void)
     sys0.planet_count = 0;
     sys0.used_theme_count = 0;
     get_planets(&sys0);
-    star_system_load_types(&sys0, &gx);
+    star_system_load_types(&sys0, &gx, &gx.habitable_count);
     star_system_select_all_themes(&sys0);
     check(sys0.planet_count == 4, "seed 0 star 0 has 4 planets");
     check(sys0.planets[1].orbit_index == 1 && sys0.planets[1].orbit_around == 0, "seed 0 birth planet is moon at orbit 1");
@@ -143,7 +144,7 @@ static void test_invariants(void)
         sys0.planet_count = 0;
         sys0.used_theme_count = 0;
         get_planets(&sys0);
-        star_system_load_types(&sys0, &gx);
+        star_system_load_types(&sys0, &gx, &gx.habitable_count);
         has_birth_ocean = 0;
         i = 0;
         while (i < sys0.planet_count)

@@ -17,9 +17,20 @@ typedef struct
     const game_desc *game;
     int spectr[DSP_MAX_STARS];
     int spectr_ready;
+    /* When a proximity rule matches, it records the star index of every
+     * participating system here (anchor first, then one per `systems[]`
+     * entry in order) so the output can report the whole constellation, not
+     * just the anchor. Reset to 0 before each top-level evaluation. */
+    int match_systems[DSP_MAX_STARS];
+    int match_system_count;
 }
 eval_context;
 
+/* Build one star system for evaluation. Idempotent and order-independent: the
+ * planet types come from the star's own RNG plus the *frozen* habitable prefix
+ * (galaxy_load_types must have run first), never from a counter that mutates as
+ * other stars are prepared. Preparing the same star twice -- as anchor and as a
+ * proximity neighbour -- yields the identical state. gx is read-only here. */
 HD static inline void prepare_star_system(star_system *sys, galaxy *gx, int index, const rule_program *prog)
 {
     sys->st = star_init(gx, index);
@@ -31,8 +42,49 @@ HD static inline void prepare_star_system(star_system *sys, galaxy *gx, int inde
     }
     if (prog->needs_themes)
     {
-        star_system_load_types(sys, gx);
+        int habitable;
+
+        habitable = gx->habitable_prefix[index];
+        star_system_load_types(sys, gx, &habitable);
     }
+}
+
+/* Variant for the in-order top-level scan when the program has no proximity
+ * node: stars are visited exactly once, in index order, so the canonical
+ * habitable prefix is simply the running count carried across calls -- no
+ * separate freeze pass is needed. `running` must start at 0 for star 0 and is
+ * threaded unchanged through the whole scan. Equivalent to prepare_star_system
+ * after galaxy_load_types, but it fuses the count into the scan for free. */
+HD static inline void prepare_star_system_seq(star_system *sys, galaxy *gx, int index,
+                                              const rule_program *prog, int *running)
+{
+    sys->st = star_init(gx, index);
+    sys->planet_count = 0;
+    sys->used_theme_count = 0;
+    if (prog->needs_planets)
+    {
+        get_planets(sys);
+    }
+    if (prog->needs_themes)
+    {
+        star_system_load_types(sys, gx, running);
+    }
+}
+
+HD static inline int prog_has_proximity(const rule_program *prog)
+{
+    int i;
+
+    i = 0;
+    while (i < prog->node_count)
+    {
+        if (prog->nodes[i].kind == RULE_PROXIMITY)
+        {
+            return 1;
+        }
+        ++i;
+    }
+    return 0;
 }
 
 HD static inline void ensure_spectr_cache(eval_context *ctx)
@@ -360,7 +412,7 @@ HD static int eval_node(const rule_program *prog, int node_idx, star_system *sys
 
 HD static inline int prox_neighbor_matches(const rule_program *prog, int child_idx,
                                            star_system *anchor, eval_context *ctx,
-                                           float max_dist, int *used)
+                                           float max_dist, int *used, int *out_index)
 {
     int j;
 
@@ -378,6 +430,7 @@ HD static inline int prox_neighbor_matches(const rule_program *prog, int child_i
             if (eval_node(prog, child_idx, &cand, ctx))
             {
                 used[j] = 1;
+                *out_index = j;
                 return 1;
             }
         }
@@ -390,6 +443,7 @@ HD static inline int eval_proximity(const rule_program *prog, const rule_node *n
                                     star_system *anchor, eval_context *ctx)
 {
     int used[DSP_MAX_STARS];
+    int found[DSP_MAX_STARS];
     int c;
 
     if (node->child_count < 1 || !eval_node(prog, node->children[0], anchor, ctx))
@@ -403,15 +457,30 @@ HD static inline int eval_proximity(const rule_program *prog, const rule_node *n
         ++c;
     }
     used[anchor->st.index] = 1;
+    found[0] = anchor->st.index;
     c = 1;
     while (c < node->child_count)
     {
-        if (!prox_neighbor_matches(prog, node->children[c], anchor, ctx, node->cond.value, used))
+        int idx;
+
+        idx = -1;
+        if (!prox_neighbor_matches(prog, node->children[c], anchor, ctx, node->cond.value, used, &idx))
         {
             return 0;
         }
+        found[c] = idx;
         ++c;
     }
+    /* All systems placed (each consumed a distinct star, so child_count <=
+     * star_count <= DSP_MAX_STARS): publish the constellation. Done last, so a
+     * nested proximity inside a child cannot clobber it mid-search. */
+    c = 0;
+    while (c < node->child_count)
+    {
+        ctx->match_systems[c] = found[c];
+        ++c;
+    }
+    ctx->match_system_count = node->child_count;
     return 1;
 }
 

@@ -400,7 +400,7 @@ static inline void build_header(char *dst, size_t n)
     lb_init(&lb);
     lb_seg(&lb, "  ", 2);
     lb_label(&lb, "seed", SEED_COL);
-    lb_label(&lb, "stars", 5);
+    lb_label(&lb, "systems", 7);
     close_body(dst, n, &lb);
 }
 

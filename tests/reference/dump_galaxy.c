@@ -57,12 +57,15 @@ int main(int argc, char **argv)
 
     generate_stars(&game, &gx);
     printf("seed=%d star_count=%d\n", game.seed, gx.star_count);
+    gx.habitable_count = 0;
     index = 0;
     while (index < gx.star_count)
     {
         sys[index].st = star_init(&gx, index);
+        sys[index].planet_count = 0;
+        sys[index].used_theme_count = 0;
         get_planets(&sys[index]);
-        star_system_load_types(&sys[index], &gx);
+        star_system_load_types(&sys[index], &gx, &gx.habitable_count);
         star_system_select_all_themes(&sys[index]);
         ++index;
     }

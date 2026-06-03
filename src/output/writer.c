@@ -17,10 +17,14 @@ static void rebuild_systems(const game_desc *base_game, int seed, galaxy *gx, st
 {
     game_desc game;
     int s;
+    int habitable;
 
     game = *base_game;
     game.seed = seed;
     generate_stars(&game, gx);
+    /* Resolve types in star order so the habitable count accumulates exactly as
+     * the canonical pass does -- the output then agrees with the rule verdict. */
+    habitable = 0;
     s = 0;
     while (s < gx->star_count)
     {
@@ -28,9 +32,10 @@ static void rebuild_systems(const game_desc *base_game, int seed, galaxy *gx, st
         systems[s].planet_count = 0;
         systems[s].used_theme_count = 0;
         get_planets(&systems[s]);
-        star_system_load_types(&systems[s], gx);
+        star_system_load_types(&systems[s], gx, &habitable);
         ++s;
     }
+    gx->habitable_count = habitable;
     s = 0;
     while (s < gx->star_count)
     {
@@ -199,7 +204,7 @@ static void emit_record_json(FILE *out, const match_record *rec, const game_desc
         fprintf(out, ",\n");
     }
     g_json_first = 0;
-    fprintf(out, "{\"seed\":%d,\"stars\":[", rec->seed);
+    fprintf(out, "{\"seed\":%d,\"systems\":[", rec->seed);
     i = 0;
     while (i < rec->index_count)
     {

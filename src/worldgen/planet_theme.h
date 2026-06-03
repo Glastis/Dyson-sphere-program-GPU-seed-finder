@@ -13,7 +13,7 @@
 #include "../constants/planet_gen.h"
 #include <math.h>
 
-HD static inline int planet_habitable_ocean_check(star_system *sys, int pidx, galaxy *gx)
+HD static inline int planet_habitable_ocean_check(star_system *sys, int pidx, galaxy *gx, int habitable_count)
 {
     int star_count;
     float num18;
@@ -24,7 +24,7 @@ HD static inline int planet_habitable_ocean_check(star_system *sys, int pidx, ga
 
     star_count = gx->game.star_count;
     num18 = fmaxf(ceilf((float)star_count * 0.29f), 11.0f);
-    num19 = (double)num18 - (double)gx->habitable_count;
+    num19 = (double)num18 - (double)habitable_count;
     a = (float)(num19 / (double)(float)(star_count - sys->st.index));
     num24 = clampf(a + (0.35f - a) * 0.5f, 0.08f, 0.8f);
     num25 = powf(clampf(planet_habitable_bias(sys, pidx) / num24, 0.0f, 1.1f), num24 * 10.0f);
@@ -52,7 +52,7 @@ HD static inline int planet_solid_type(const star_system *sys, int pidx)
     return p->type_factor >= (0.9 / (double)f2 - 0.1) ? PLANET_TYPE_ICE : PLANET_TYPE_DESERT;
 }
 
-HD static inline int planet_unmodified_type(star_system *sys, int pidx, galaxy *gx)
+HD static inline int planet_unmodified_type(star_system *sys, int pidx, galaxy *gx, int *habitable_count)
 {
     planet *p;
 
@@ -63,18 +63,23 @@ HD static inline int planet_unmodified_type(star_system *sys, int pidx, galaxy *
     }
     if (planet_is_birth(sys, pidx))
     {
-        gx->habitable_count += 1;
+        *habitable_count += 1;
         return PLANET_TYPE_OCEAN;
     }
-    if (!star_is_birth(&sys->st) && planet_habitable_ocean_check(sys, pidx, gx))
+    if (!star_is_birth(&sys->st) && planet_habitable_ocean_check(sys, pidx, gx, *habitable_count))
     {
-        gx->habitable_count += 1;
+        *habitable_count += 1;
         return PLANET_TYPE_OCEAN;
     }
     return planet_solid_type(sys, pidx);
 }
 
-HD static inline void star_system_load_types(star_system *sys, galaxy *gx)
+/* Resolve every planet type of one star. `habitable_count` is the running tally
+ * of habitable (ocean) planets seen so far; it is read by the ocean test and
+ * bumped for each ocean. The caller owns it -- during rule evaluation it is a
+ * local seeded from the frozen prefix (so the result is order-independent);
+ * during the canonical pass it accumulates across all stars in index order. */
+HD static inline void star_system_load_types(star_system *sys, galaxy *gx, int *habitable_count)
 {
     int i;
 
@@ -83,10 +88,39 @@ HD static inline void star_system_load_types(star_system *sys, galaxy *gx)
     {
         if (sys->planets[i].planet_type == -1)
         {
-            sys->planets[i].planet_type = planet_unmodified_type(sys, i, gx);
+            sys->planets[i].planet_type = planet_unmodified_type(sys, i, gx, habitable_count);
         }
         ++i;
     }
+}
+
+/* Canonical, deterministic pass over the whole galaxy: process the stars once
+ * each, in index order, resolving planet types and accumulating the habitable
+ * count exactly as DSP does. It records, per star, the prefix habitable count
+ * (oceans in all earlier stars) so rule evaluation can later reproduce each
+ * star's verdict in isolation, and leaves gx->habitable_count at the total.
+ * Must run after generate_stars and before any rule evaluation that needs
+ * planet themes. One star_system lives on the stack at a time. */
+HD static inline void galaxy_load_types(galaxy *gx)
+{
+    int index;
+    int count;
+
+    count = 0;
+    index = 0;
+    while (index < gx->star_count)
+    {
+        star_system sys;
+
+        gx->habitable_prefix[index] = count;
+        sys.st = star_init(gx, index);
+        sys.planet_count = 0;
+        sys.used_theme_count = 0;
+        get_planets(&sys);
+        star_system_load_types(&sys, gx, &count);
+        ++index;
+    }
+    gx->habitable_count = count;
 }
 
 HD static inline int is_theme_used(const star_system *sys, int theme_id)

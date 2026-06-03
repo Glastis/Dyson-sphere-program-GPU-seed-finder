@@ -5,8 +5,9 @@ dsp-seed-finder [options] <conditions.json>
 ```
 
 Results go to **stdout** (or `--output`); progress goes to **stderr**, so the two
-never mix in a pipeline. Each result line is `seed` and the matching star indexes,
-tab-separated:
+never mix in a pipeline. Each result line is `seed` and the matching star indexes
+(the `systems` column), tab-separated. For a proximity rule that is the whole
+constellation — the anchor first, then one index per `systems[]` entry:
 
 ```
 5457	4
@@ -61,7 +62,7 @@ When stderr is a terminal you get a **live panel**: a rounded box with the colou
 progress bar, seeds scanned, throughput (auto-scaled to k/s or M/s), ETA, elapsed
 time, and the running cursor (latest seed tested). Below a divider, a **rolling
 window of the last 10 matching seeds** is shown as a two-column table (`seed` /
-`stars`). The panel appears immediately at 0% (so the tool never looks hung while
+`systems`). The panel appears immediately at 0% (so the tool never looks hung while
 the first GPU batch is in flight) and redraws in place.
 
 ```

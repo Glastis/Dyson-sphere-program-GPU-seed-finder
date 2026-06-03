@@ -44,9 +44,13 @@ n=$("$BIN" --max-seeds 1 --seed-end 10000 tests/fixtures/all-rare-resources.json
 [ "$n" -eq 1 ] && echo "PASS: rare-resources example stays satisfiable" \
     || { echo "FAIL: rare-resources example matched nothing in 10000 seeds"; fail=1; }
 run "$BIN" --validate tests/fixtures/promised-land.json
-first=$("$BIN" --max-seeds 1 --seed-end 10000 tests/fixtures/promised-land.json 2>/dev/null | cut -f1)
-[ "$first" = "5457" ] && echo "PASS: promised-land example stays satisfiable (first match seed 5457)" \
-    || { echo "FAIL: promised-land expected first match seed 5457, got '$first'"; fail=1; }
+# Order-independent evaluation makes this rule correctly rare: the first true
+# match is seed 89808 (constellation 0,58,63), where system 58 genuinely carries
+# the 9 resources and 63 the unipolar magnet. (Before the fix the engine wrongly
+# reported seed 7526 here, an order-dependent false positive.)
+first=$("$BIN" --max-seeds 1 --seed-end 100000 tests/fixtures/promised-land.json 2>/dev/null | cut -f1)
+[ "$first" = "89808" ] && echo "PASS: promised-land example stays satisfiable (first match seed 89808)" \
+    || { echo "FAIL: promised-land expected first match seed 89808, got '$first'"; fail=1; }
 
 echo
 echo "### 5. GPU-mode orchestration (kernel stubbed by the CPU reference) == CPU engine"
