@@ -54,8 +54,13 @@ else()
         src/gpu/gpu_search.c
         src/gpu/gpu_kernel.cu)
     target_include_directories(dsp-seed-finder PRIVATE src)
+    # The scan kernel naturally wants ~207 registers/thread, which caps SM
+    # occupancy at ~16-20% and leaves the GPU unable to hide memory/FP latency.
+    # Capping at 96 registers raises occupancy and measured ~+7% throughput with
+    # no change to results. See docs/perf-spatial-grid.md for the full benchmark.
     target_compile_options(dsp-seed-finder PRIVATE
-        $<$<COMPILE_LANGUAGE:C>:${DSP_WARNINGS}>)
+        $<$<COMPILE_LANGUAGE:C>:${DSP_WARNINGS}>
+        $<$<COMPILE_LANGUAGE:CUDA>:-maxrregcount=96>)
     find_package(Threads REQUIRED)
     target_link_libraries(dsp-seed-finder PRIVATE Threads::Threads m)
     message(STATUS "Configured GPU build (dsp-seed-finder) for sm_120 with ${DSP_NVCC}.")
