@@ -248,23 +248,25 @@ static void mt_group_uint(char *buf, size_t n, long long v)
 {
     char tmp[32];
     int len;
-    int group;
+    int total;
+    int pad;
     int out;
     int i;
 
     len = snprintf(tmp, sizeof(tmp), "%lld", v < 0 ? 0 : v);
-    group = len % 3 == 0 ? 3 : len % 3;
+    /* Left-pad with zeros to the next multiple of 4 digits, then split into
+     * space-separated groups of 4 (e.g. 1776797 -> "0177 6797"). */
+    total = ((len + 3) / 4) * 4;
+    pad = total - len;
     out = 0;
     i = 0;
-    while (i < len && (size_t)out < n - 2)
+    while (i < total && (size_t)out < n - 2)
     {
-        if (i > 0 && group == 0)
+        if (i > 0 && i % 4 == 0)
         {
-            buf[out++] = ',';
-            group = 3;
+            buf[out++] = ' ';
         }
-        buf[out++] = tmp[i];
-        --group;
+        buf[out++] = i < pad ? '0' : tmp[i - pad];
         ++i;
     }
     buf[out] = '\0';
