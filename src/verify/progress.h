@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "../cli/config.h"
+#include "../output/match_tree.h"
 
 #define C_RESET   "\033[0m"
 #define C_BOLD    "\033[1m"
@@ -34,12 +35,18 @@
 #define FANCY_INTERVAL  0.06
 #define PLAIN_INTERVAL  0.50
 
+/* The match window is a vertical budget: the whole panel (header + the rolling
+ * window of match trees + frame) never exceeds PANEL_MAX_LINES. As many of the
+ * most recent whole match blocks as fit are shown. */
+#define PANEL_MAX_LINES 50
+#define PANEL_BLOCKS    12
+
 typedef struct
 {
-    int seed;
-    char stars[24];
+    int line_count;
+    mt_line lines[MT_MAX_LINES];
 }
-match_view;
+match_block;
 
 typedef struct
 {
@@ -48,7 +55,7 @@ typedef struct
     int is_plain;
     int is_tty;
     int is_started;
-    match_view ring[PROGRESS_WINDOW];
+    match_block ring[PANEL_BLOCKS];
     int ring_count;
 }
 progress_bar;
@@ -272,6 +279,15 @@ static inline void lb_val(lb_t *lb, const char *color, const char *text)
     lb_raw(lb, C_RESET);
 }
 
+/* Like lb_val but the caller passes the visual column width (text may contain
+ * multi-byte UTF-8, for which strlen would over-count). */
+static inline void lb_val_cols(lb_t *lb, const char *color, const char *text, int cols)
+{
+    lb_raw(lb, color);
+    lb_seg(lb, text, cols);
+    lb_raw(lb, C_RESET);
+}
+
 static inline void lb_space(lb_t *lb)
 {
     if (lb->cols >= BOX_INNER)
@@ -393,27 +409,36 @@ static inline void build_divider(char *dst, size_t n, long long found)
         C_GREY ") %s" G_TEE_R C_RESET, num, dashes);
 }
 
-static inline void build_header(char *dst, size_t n)
+/* One line of a match tree, framed in the box: label left, value right-aligned.
+ * Header lines (the seed) are bold; values are cyan. */
+static inline void build_tree_line(char *dst, size_t n, const mt_line *m)
 {
     lb_t lb;
+    int lcols;
+    int rcols;
+    int gap;
+    int i;
 
+    lcols = mt_utf8_cols(m->left);
+    rcols = mt_utf8_cols(m->right);
     lb_init(&lb);
     lb_seg(&lb, "  ", 2);
-    lb_label(&lb, "seed", SEED_COL);
-    lb_label(&lb, "systems", 7);
-    close_body(dst, n, &lb);
-}
-
-static inline void build_match_row(char *dst, size_t n, const match_view *m)
-{
-    char seed[24];
-    lb_t lb;
-
-    group_uint(seed, sizeof(seed), m->seed);
-    lb_init(&lb);
-    lb_seg(&lb, "  ", 2);
-    lb_field(&lb, C_YELLOW, seed, SEED_COL);
-    lb_val(&lb, C_RESET, m->stars);
+    lb_val_cols(&lb, m->is_header ? C_BOLD C_YELLOW : C_RESET, m->left, lcols);
+    gap = BOX_INNER - 2 - lcols - rcols;
+    if (gap < 1)
+    {
+        gap = 1;
+    }
+    i = 0;
+    while (i < gap)
+    {
+        lb_space(&lb);
+        ++i;
+    }
+    if (rcols > 0)
+    {
+        lb_val_cols(&lb, m->is_header ? C_GREY : C_CYAN, m->right, rcols);
+    }
     close_body(dst, n, &lb);
 }
 
@@ -446,6 +471,9 @@ static inline int build_panel(const progress_bar *pb, const fancy_fields *f,
                               const progress_info *info, char lines[][800])
 {
     int n;
+    int budget;
+    int used;
+    int start;
     int i;
 
     n = 0;
@@ -455,11 +483,34 @@ static inline int build_panel(const progress_bar *pb, const fancy_fields *f,
     build_rate_line(lines[n++], 800, f);
     build_cursor_line(lines[n++], 800, f);
     build_divider(lines[n++], 800, info->found);
-    build_header(lines[n++], 800);
-    i = 0;
+
+    /* Fit the most recent whole match blocks into the remaining budget (minus
+     * the closing frame line). Walk newest -> oldest accumulating heights. */
+    budget = PANEL_MAX_LINES - n - 1;
+    used = 0;
+    start = pb->ring_count;
+    i = pb->ring_count - 1;
+    while (i >= 0 && used + pb->ring[i].line_count <= budget)
+    {
+        used += pb->ring[i].line_count;
+        start = i;
+        --i;
+    }
+    if (start == pb->ring_count && pb->ring_count > 0)
+    {
+        start = pb->ring_count - 1;  /* newest block too tall: show it, truncated */
+    }
+    i = start;
     while (i < pb->ring_count)
     {
-        build_match_row(lines[n++], 800, &pb->ring[i]);
+        int k;
+
+        k = 0;
+        while (k < pb->ring[i].line_count && n < PANEL_MAX_LINES - 1)
+        {
+            build_tree_line(lines[n++], 800, &pb->ring[i].lines[k]);
+            ++k;
+        }
         ++i;
     }
     build_bottom(lines[n++], 800);
@@ -488,7 +539,7 @@ static inline void panel_blit(progress_bar *pb, char lines[][800], int n)
 static inline void render_fancy(progress_bar *pb, const progress_info *info)
 {
     fancy_fields f;
-    char lines[24][800];
+    char lines[PANEL_MAX_LINES + 2][800];
     int n;
 
     fancy_fill(&f, info);
@@ -538,22 +589,32 @@ static inline void progress_init(progress_bar *pb, const cli_config *cfg)
     pb->ring_count = 0;
 }
 
-static inline void progress_push_match(progress_bar *pb, int seed, const char *stars)
+static inline void progress_push_block(progress_bar *pb, const mt_line *lines, int count)
 {
-    match_view *slot;
+    match_block *slot;
+    int i;
 
-    if (pb->ring_count < PROGRESS_WINDOW)
+    if (count > MT_MAX_LINES)
+    {
+        count = MT_MAX_LINES;
+    }
+    if (pb->ring_count < PANEL_BLOCKS)
     {
         slot = &pb->ring[pb->ring_count];
         pb->ring_count += 1;
     }
     else
     {
-        memmove(pb->ring, pb->ring + 1, (PROGRESS_WINDOW - 1) * sizeof(pb->ring[0]));
-        slot = &pb->ring[PROGRESS_WINDOW - 1];
+        memmove(pb->ring, pb->ring + 1, (PANEL_BLOCKS - 1) * sizeof(pb->ring[0]));
+        slot = &pb->ring[PANEL_BLOCKS - 1];
     }
-    slot->seed = seed;
-    snprintf(slot->stars, sizeof(slot->stars), "%s", stars);
+    slot->line_count = count;
+    i = 0;
+    while (i < count)
+    {
+        slot->lines[i] = lines[i];
+        ++i;
+    }
 }
 
 static inline void progress_render(progress_bar *pb, const progress_info *info, int is_final)

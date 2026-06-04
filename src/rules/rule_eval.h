@@ -11,6 +11,24 @@
 #include "../worldgen/planet_vein.h"
 #include "../constants/enums.h"
 
+/* Link tables: dense project index (enum dsp_gas / dsp_ocean) -> the game's
+ * item id. This is the one spot where we cross back to the game's "dumb" ids,
+ * so the rest of the engine and the output stay on the clean dense index. */
+static DSP_CONST const int DSP_GAS_ID[DSP_GAS_COUNT] = {
+    [DSP_GAS_NONE]      = GAS_TYPE_NONE,
+    [DSP_GAS_FIREICE]   = GAS_TYPE_FIREICE,
+    [DSP_GAS_HYDROGEN]  = GAS_TYPE_HYDROGEN,
+    [DSP_GAS_DEUTERIUM] = GAS_TYPE_DEUTERIUM
+};
+
+static DSP_CONST const int DSP_OCEAN_ID[DSP_OCEAN_COUNT] = {
+    [DSP_OCEAN_NONE]   = OCEAN_TYPE_NONE,
+    [DSP_OCEAN_ICE]    = OCEAN_TYPE_ICE,
+    [DSP_OCEAN_LAVA]   = OCEAN_TYPE_LAVA,
+    [DSP_OCEAN_WATER]  = OCEAN_TYPE_WATER,
+    [DSP_OCEAN_SULFUR] = OCEAN_TYPE_SULFUR
+};
+
 typedef struct
 {
     galaxy *gx;
@@ -33,17 +51,18 @@ eval_context;
  * proximity neighbour -- yields the identical state. gx is read-only here. */
 HD static inline void prepare_star_system(star_system *sys, galaxy *gx, int index, const rule_program *prog)
 {
-    sys->st = star_init(gx, index);
+    sys->st = star_init_ex(gx, index, prog->needs_hive);
     sys->planet_count = 0;
+    sys->planets_ready = 0;
     sys->used_theme_count = 0;
-    if (prog->needs_planets)
-    {
-        get_planets(sys);
-    }
+    /* Same lazy/eager split as prepare_star_system_seq: themes need the planets
+     * up front (load_types reads the frozen habitable prefix), otherwise the
+     * planet conditions generate them on demand through ensure_planets. */
     if (prog->needs_themes)
     {
         int habitable;
 
+        get_planets(sys);
         habitable = gx->habitable_prefix[index];
         star_system_load_types(sys, gx, &habitable);
     }
@@ -58,15 +77,18 @@ HD static inline void prepare_star_system(star_system *sys, galaxy *gx, int inde
 HD static inline void prepare_star_system_seq(star_system *sys, galaxy *gx, int index,
                                               const rule_program *prog, int *running)
 {
-    sys->st = star_init(gx, index);
+    sys->st = star_init_ex(gx, index, prog->needs_hive);
     sys->planet_count = 0;
+    sys->planets_ready = 0;
     sys->used_theme_count = 0;
-    if (prog->needs_planets)
-    {
-        get_planets(sys);
-    }
+    /* When the program reads planet themes, the planets must exist before
+     * star_system_load_types runs (it bumps the canonical habitable count for
+     * EVERY star, matched or not), so generate them eagerly. Without themes the
+     * planet conditions pull them in on demand via ensure_planets -- a star
+     * eliminated by a cheap star-level AND child never pays get_planets. */
     if (prog->needs_themes)
     {
+        get_planets(sys);
         star_system_load_types(sys, gx, running);
     }
 }
@@ -100,7 +122,8 @@ HD static inline void ensure_spectr_cache(eval_context *ctx)
     {
         star tmp;
 
-        tmp = star_init(ctx->gx, i);
+        /* Only star_spectr is read here -- never the hive sub-generator. */
+        tmp = star_init_ex(ctx->gx, i, 0);
         ctx->spectr[i] = star_spectr(&tmp);
         ++i;
     }
@@ -236,6 +259,7 @@ HD static inline int eval_planet_count(const rule_node *node, star_system *sys)
     int len;
     int i;
 
+    ensure_planets(sys);
     if (!node->flag)
     {
         return cond_eval(&node->cond, (float)sys->planet_count);
@@ -258,6 +282,7 @@ HD static inline int eval_satellite_count(const rule_node *node, star_system *sy
     int count;
     int i;
 
+    ensure_planets(sys);
     count = 0;
     i = 0;
     while (i < sys->planet_count)
@@ -276,6 +301,7 @@ HD static inline int eval_tidal_lock_count(const rule_node *node, star_system *s
     int count;
     int i;
 
+    ensure_planets(sys);
     count = 0;
     i = 0;
     while (i < sys->planet_count)
@@ -295,6 +321,7 @@ HD static inline int eval_planet_in_dyson_count(const rule_node *node, star_syst
     int count;
     int i;
 
+    ensure_planets(sys);
     dyson_radius = (float)star_dyson_radius(&sys->st);
     count = 0;
     i = 0;
@@ -317,6 +344,7 @@ HD static inline int eval_gas_count(const rule_node *node, star_system *sys)
     int count;
     int i;
 
+    ensure_planets(sys);
     star_system_select_all_themes(sys);
     count = 0;
     i = 0;
@@ -342,6 +370,7 @@ HD static inline int eval_theme_id(const rule_node *node, star_system *sys)
 {
     int i;
 
+    ensure_planets(sys);
     star_system_select_all_themes(sys);
     i = 0;
     while (i < sys->planet_count)
@@ -359,11 +388,12 @@ HD static inline int eval_ocean_type(const rule_node *node, star_system *sys)
 {
     int i;
 
+    ensure_planets(sys);
     star_system_select_all_themes(sys);
     i = 0;
     while (i < sys->planet_count)
     {
-        if (THEME_PROTOS[sys->planets[i].theme_index].water_item_id == node->ocean_type)
+        if (THEME_PROTOS[sys->planets[i].theme_index].water_item_id == DSP_OCEAN_ID[node->ocean_type])
         {
             return 1;
         }
@@ -377,6 +407,7 @@ HD static inline int eval_gas_rate(const rule_node *node, star_system *sys, cons
     float total;
     int i;
 
+    ensure_planets(sys);
     star_system_select_all_themes(sys);
     total = 0.0f;
     i = 0;
@@ -391,7 +422,7 @@ HD static inline int eval_gas_rate(const rule_node *node, star_system *sys, cons
         g = 0;
         while (g < gc)
         {
-            if (items[g] == node->gas_type)
+            if (items[g] == DSP_GAS_ID[node->gas_type])
             {
                 total += rates[g];
             }
@@ -404,6 +435,7 @@ HD static inline int eval_gas_rate(const rule_node *node, star_system *sys, cons
 
 HD static inline int eval_average_vein_amount(const rule_node *node, star_system *sys, const game_desc *game)
 {
+    ensure_planets(sys);
     star_system_select_all_themes(sys);
     return cond_eval(&node->cond, star_system_avg_vein(sys, game, node->vein));
 }
@@ -510,6 +542,12 @@ HD static inline int eval_combinator(const rule_program *prog, const rule_node *
     return want_all ? 1 : 0;
 }
 
+/* Justified exception to the project's no-switch rule: eval_leaf runs on the
+ * GPU (device), and a function-pointer dispatch table cannot be statically
+ * initialised in CUDA device code (the address of a __device__ function isn't a
+ * constant expression). The only device-safe dispatches are switch or an if
+ * ladder, so switch it is. Host-side dispatch (e.g. the match-tree renderer)
+ * stays table-driven. */
 HD static inline int eval_leaf(const rule_node *node, star_system *sys, eval_context *ctx)
 {
     switch (node->kind)

@@ -1,0 +1,31 @@
+{
+    "game": {
+        "starCount": 64,
+        "resourceMultiplier": 1.0,
+        "hiveInitialColonize": 1.0,
+        "hiveMaxDensity": 1.0
+    },
+    "rule": {
+        "type": "proximity",
+        "maxDistance": 15.0,
+        "systems": [
+            { "type": "birth" },
+
+            {
+                "type": "and",
+                "rules": [
+                    { "type": "starType", "starTypes": ["GiantStar"] },
+                    { "type": "spectr", "spectr": ["O", "B"] }
+                ]
+            },
+
+            {
+                "type": "and",
+                "rules": [
+                    { "type": "starType", "starTypes": ["GiantStar"] },
+                    { "type": "spectr", "spectr": ["M", "K"] }
+                ]
+            }
+        ]
+    }
+}

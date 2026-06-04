@@ -43,7 +43,7 @@ HD static inline float planet_orbital_radius(const star_system *sys, int pidx)
 
         parent_radius = (double)planet_real_radius(&sys->planets[p->orbit_around]);
         return (float)(((1600.0 * (double)p->orbit_index + 200.0)
-                        * pow((double)orbit_scaler, 0.3)
+                        * (double)wpow((wreal)orbit_scaler, (wreal)0.3)
                         * (double)(a + (1.0f - a) * 0.5f)
                         + parent_radius) / 40000.0);
     }
@@ -79,7 +79,7 @@ HD static inline double planet_orbital_period(const star_system *sys, int pidx)
     f1 = (double)planet_orbital_radius(sys, pidx);
     gm = planet_has_orbit_around(p) ? ORBITAL_PERIOD_SATELLITE_GM
          : ORBITAL_PERIOD_STAR_GM * (double)star_mass(&sys->st);
-    return sqrt(4.0 * M_PI * M_PI * f1 * f1 * f1 / gm);
+    return (double)wsqrt((wreal)(4.0 * M_PI * M_PI * f1 * f1 * f1 / gm));
 }
 
 HD static inline double planet_sun_orbital_period(const star_system *sys, int pidx)

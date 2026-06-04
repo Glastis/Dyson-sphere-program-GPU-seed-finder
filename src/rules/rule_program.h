@@ -77,6 +77,7 @@ typedef struct
     int root;
     int needs_planets;
     int needs_themes;
+    int needs_hive;
 }
 rule_program;
 

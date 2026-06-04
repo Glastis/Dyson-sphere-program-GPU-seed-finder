@@ -1,5 +1,6 @@
 #include "writer.h"
 #include "names.h"
+#include "match_tree.h"
 #include "../cli/config.h"
 #include "../worldgen/galaxy_gen.h"
 #include "../worldgen/star.h"
@@ -13,36 +14,7 @@
 
 static int g_json_first = 1;
 
-static void rebuild_systems(const game_desc *base_game, int seed, galaxy *gx, star_system *systems)
-{
-    game_desc game;
-    int s;
-    int habitable;
-
-    game = *base_game;
-    game.seed = seed;
-    generate_stars(&game, gx);
-    /* Resolve types in star order so the habitable count accumulates exactly as
-     * the canonical pass does -- the output then agrees with the rule verdict. */
-    habitable = 0;
-    s = 0;
-    while (s < gx->star_count)
-    {
-        systems[s].st = star_init(gx, s);
-        systems[s].planet_count = 0;
-        systems[s].used_theme_count = 0;
-        get_planets(&systems[s]);
-        star_system_load_types(&systems[s], gx, &habitable);
-        ++s;
-    }
-    gx->habitable_count = habitable;
-    s = 0;
-    while (s < gx->star_count)
-    {
-        star_system_select_all_themes(&systems[s]);
-        ++s;
-    }
-}
+/* rebuild_systems lives in match_tree.c (shared, canonical ordered pass). */
 
 static void emit_vein_json(FILE *out, const vein *v)
 {
@@ -218,26 +190,36 @@ static void emit_record_json(FILE *out, const match_record *rec, const game_desc
     fprintf(out, "]}");
 }
 
-static void emit_record_text(FILE *out, const match_record *rec)
+#define TEXT_VALUE_COL 46
+
+static void emit_record_text(FILE *out, const match_record *rec,
+                             const game_desc *base_game, const rule_program *prog)
 {
+    mt_line lines[MT_MAX_LINES];
+    int count;
     int i;
 
-    fprintf(out, "%d", rec->seed);
-    if (rec->index_count > 0)
+    count = match_tree_render(rec, base_game, prog, lines, MT_MAX_LINES);
+    i = 0;
+    while (i < count)
     {
-        fprintf(out, "\t");
-        i = 0;
-        while (i < rec->index_count)
+        if (lines[i].right[0] != '\0')
         {
-            if (i > 0)
+            int pad;
+
+            pad = TEXT_VALUE_COL - mt_utf8_cols(lines[i].left);
+            if (pad < 1)
             {
-                fprintf(out, ",");
+                pad = 1;
             }
-            fprintf(out, "%d", rec->indexes[i]);
-            ++i;
+            fprintf(out, "%s%*s%s\n", lines[i].left, pad, "", lines[i].right);
         }
+        else
+        {
+            fprintf(out, "%s\n", lines[i].left);
+        }
+        ++i;
     }
-    fprintf(out, "\n");
 }
 
 static int count_ocean_planets(const star_system *sys)
@@ -306,7 +288,6 @@ void output_begin(FILE *out, int format)
 void output_record(FILE *out, int format, const match_record *rec,
                    const game_desc *base_game, const rule_program *prog)
 {
-    (void)prog;
     if (format == OUTPUT_FORMAT_JSON)
     {
         emit_record_json(out, rec, base_game);
@@ -317,7 +298,7 @@ void output_record(FILE *out, int format, const match_record *rec,
     }
     else
     {
-        emit_record_text(out, rec);
+        emit_record_text(out, rec, base_game, prog);
     }
 }
 

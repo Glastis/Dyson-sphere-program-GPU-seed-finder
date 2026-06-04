@@ -44,21 +44,24 @@ static const name_entry SPECTR_TYPES[] =
     { "X", SPECTR_TYPE_X }
 };
 
+/* Parse straight to the dense project index (enum dsp_ocean / dsp_gas); the
+ * game's item id is recovered at eval time via the DSP_OCEAN_ID / DSP_GAS_ID
+ * link tables in rule_eval.h. */
 static const name_entry OCEAN_TYPES[] =
 {
-    { "None", OCEAN_TYPE_NONE },
-    { "Ice", OCEAN_TYPE_ICE },
-    { "Lava", OCEAN_TYPE_LAVA },
-    { "Water", OCEAN_TYPE_WATER },
-    { "Sulfur", OCEAN_TYPE_SULFUR }
+    { "None", DSP_OCEAN_NONE },
+    { "Ice", DSP_OCEAN_ICE },
+    { "Lava", DSP_OCEAN_LAVA },
+    { "Water", DSP_OCEAN_WATER },
+    { "Sulfur", DSP_OCEAN_SULFUR }
 };
 
 static const name_entry GAS_TYPES[] =
 {
-    { "None", GAS_TYPE_NONE },
-    { "Fireice", GAS_TYPE_FIREICE },
-    { "Hydrogen", GAS_TYPE_HYDROGEN },
-    { "Deuterium", GAS_TYPE_DEUTERIUM }
+    { "None", DSP_GAS_NONE },
+    { "Fireice", DSP_GAS_FIREICE },
+    { "Hydrogen", DSP_GAS_HYDROGEN },
+    { "Deuterium", DSP_GAS_DEUTERIUM }
 };
 
 static const name_entry VEIN_TYPES[] =
@@ -818,12 +821,20 @@ static int kind_needs_themes(int kind)
         || kind == RULE_GAS_RATE || kind == RULE_AVERAGE_VEIN_AMOUNT;
 }
 
+/* Only the hive-count rule reads the per-star hive sub-generator; when no such
+ * rule is present, star_init can skip materialising it (see star_init_ex). */
+static int kind_needs_hive(int kind)
+{
+    return kind == RULE_HIVE_COUNT;
+}
+
 static void compute_needs(rule_program *prog)
 {
     int index;
 
     prog->needs_planets = 0;
     prog->needs_themes = 0;
+    prog->needs_hive = 0;
     index = 0;
     while (index < prog->node_count)
     {
@@ -837,6 +848,10 @@ static void compute_needs(rule_program *prog)
         if (kind_needs_themes(kind))
         {
             prog->needs_themes = 1;
+        }
+        if (kind_needs_hive(kind))
+        {
+            prog->needs_hive = 1;
         }
         if (kind == RULE_GAS_COUNT && prog->nodes[index].flag != RULE_FLAG_NONE)
         {

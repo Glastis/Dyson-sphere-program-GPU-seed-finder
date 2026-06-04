@@ -51,6 +51,15 @@ void gpu_fetch(gpu_context *ctx, int slot, unsigned char *out_hits, int count)
     memcpy(out_hits, ctx->hits[slot], (size_t)count);
 }
 
+double gpu_bench_kernel(gpu_context *ctx, long long seed_start, int count, int iters)
+{
+    (void)ctx;
+    (void)seed_start;
+    (void)count;
+    (void)iters;
+    return 0.0;
+}
+
 void gpu_destroy(gpu_context *ctx)
 {
     free(ctx->hits[0]);

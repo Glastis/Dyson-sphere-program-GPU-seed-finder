@@ -1,0 +1,15 @@
+{
+    "game": {
+        "starCount": 64,
+        "resourceMultiplier": 1.0,
+        "hiveInitialColonize": 1.0,
+        "hiveMaxDensity": 1.0
+    },
+    "rule": {
+        "type": "and",
+        "rules": [
+            { "type": "starType", "starTypes": ["GiantStar"] },
+            { "type": "planetCount", "op": "gte", "value": 3 }
+        ]
+    }
+}

@@ -79,4 +79,29 @@ enum gas_type
     GAS_TYPE_DEUTERIUM = 1121
 };
 
+/* The game labels gases and oceans with sparse / negative item ids (the enums
+ * above -- the "dumb" ids that come straight from the game). Internally we use a
+ * dense 0..N index instead, so anything that needs a lookup can just index an
+ * array. The dense index is the project-side identity; the game id is recovered
+ * only when we read generated game data, via the DSP_GAS_ID / DSP_OCEAN_ID link
+ * tables. Keep these enums, those link tables and the name tables in lockstep. */
+enum dsp_gas
+{
+    DSP_GAS_NONE = 0,
+    DSP_GAS_FIREICE,
+    DSP_GAS_HYDROGEN,
+    DSP_GAS_DEUTERIUM,
+    DSP_GAS_COUNT
+};
+
+enum dsp_ocean
+{
+    DSP_OCEAN_NONE = 0,
+    DSP_OCEAN_ICE,
+    DSP_OCEAN_LAVA,
+    DSP_OCEAN_WATER,
+    DSP_OCEAN_SULFUR,
+    DSP_OCEAN_COUNT
+};
+
 #endif

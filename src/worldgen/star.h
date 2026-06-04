@@ -43,13 +43,26 @@ HD static inline int star_is_birth(const star *st)
     return st->index == 0;
 }
 
-HD static inline star star_init(const galaxy *gx, int index)
+/* Build one star. `with_hive` selects whether the (expensive) hive sub-generator
+ * is materialised: hive_rand is a leaf PRNG -- nothing in the worldgen reads
+ * back from it, and its two outputs (safety_factor_modifier,
+ * max_hive_count_modifier) feed *only* the hive-count helpers (star_safety_factor
+ * -> star_initial_hive_count, star_max_hive_count). So when no consumer needs the
+ * hive count we can skip prng_new(...) + its two draws entirely.
+ *
+ * PRNG fidelity: the only parent draw involved is prng_next_seed(&rand2), which
+ * seeds hive_rand. It is the LAST use of rand2 (and of rand1) in this function --
+ * nothing downstream depends on rand2's post-draw state. We still issue that draw
+ * in the light path so the parent generators advance identically, keeping the
+ * sequence bit-for-bit unchanged; only the leaf hive_rand work is elided. */
+HD static inline star star_init_ex(const galaxy *gx, int index, int with_hive)
 {
     star st;
     dsp_random rand1;
     dsp_random rand2;
     double rn;
     double rt;
+    int hive_seed;
 
     st.index = index;
     st.star_type = gx->star_types[index];
@@ -71,16 +84,25 @@ HD static inline star star_init(const galaxy *gx, int index)
     st.mp_mass_factor = index == 0 ? 0.0 : prng_next_f64(&rand2);
     st.lifetime_factor = prng_next_f64(&rand2);
     st.mp_y = prng_next_f64(&rand2) * 0.4 - 0.2;
-    st.radius_factor = pow(2.0, st.mp_y);
-    st.hive_rand = prng_new(prng_next_seed(&rand2));
-    st.safety_factor_modifier = prng_next_f64(&st.hive_rand);
-    st.max_hive_count_modifier = prng_next_i32(&st.hive_rand, 1000);
+    st.radius_factor = (double)wpow((wreal)2.0, (wreal)st.mp_y);
+    hive_seed = prng_next_seed(&rand2);
+    if (with_hive)
+    {
+        st.hive_rand = prng_new(hive_seed);
+        st.safety_factor_modifier = prng_next_f64(&st.hive_rand);
+        st.max_hive_count_modifier = prng_next_i32(&st.hive_rand, 1000);
+    }
     st.level = (float)index / (float)(gx->game.star_count - 1);
     st.mp_spectr_factor = st.need_spectr == SPECTR_TYPE_M ? SPECTR_FACTOR_M
                           : (st.need_spectr == SPECTR_TYPE_O ? SPECTR_FACTOR_O : 0.0f);
     st.hive_max_density = gx->game.hive_max_density;
     st.hive_initial_colonize = gx->game.hive_initial_colonize;
     return st;
+}
+
+HD static inline star star_init(const galaxy *gx, int index)
+{
+    return star_init_ex(gx, index, 1);
 }
 
 HD static inline float star_unmodified_mass_main(const star *st)
@@ -193,24 +215,24 @@ HD static inline float star_temperature_factor(const star *st)
 
 HD static inline float star_unmodified_temperature(const star *st)
 {
-    double f1;
+    wreal f1;
 
-    f1 = (double)star_temperature_factor(st);
-    return (float)(pow(f1, 0.56 + 0.14 / log_base(f1 + 4.0, 5.0)) * 4450.0 + 1300.0);
+    f1 = (wreal)star_temperature_factor(st);
+    return (float)(wpow(f1, (wreal)0.56 + (wreal)0.14 / log_base(f1 + (wreal)4.0, (wreal)5.0)) * (wreal)4450.0 + (wreal)1300.0);
 }
 
-HD static inline double star_class_factor(const star *st)
+HD static inline wreal star_class_factor(const star *st)
 {
-    double temperature;
-    double spectr_factor;
+    wreal temperature;
+    wreal spectr_factor;
 
-    temperature = (double)star_unmodified_temperature(st);
-    spectr_factor = log_base((temperature - 1300.0) / 4500.0, 2.6) - 0.5;
-    if (spectr_factor < 0.0)
+    temperature = (wreal)star_unmodified_temperature(st);
+    spectr_factor = log_base((temperature - (wreal)1300.0) / (wreal)4500.0, (wreal)2.6) - (wreal)0.5;
+    if (spectr_factor < (wreal)0.0)
     {
-        spectr_factor *= 4.0;
+        spectr_factor *= (wreal)4.0;
     }
-    return clampd(spectr_factor, -4.0, 2.0);
+    return clampw(spectr_factor, (wreal)-4.0, (wreal)2.0);
 }
 
 HD static inline int star_is_degenerate(const star *st)
@@ -274,7 +296,7 @@ HD static inline float star_radius_giant(const star *st)
 {
     float num4;
 
-    num4 = (float)(pow(5.0, fabs(log10((double)star_unmodified_mass(st)) - 0.7)) * 5.0);
+    num4 = (float)(wpow((wreal)5.0, wfabs(wlog10((wreal)star_unmodified_mass(st)) - (wreal)0.7)) * (wreal)5.0);
     if (num4 > 10.0f)
     {
         num4 = (logf(num4 * 0.1f) + 1.0f) * 10.0f;
@@ -292,7 +314,7 @@ HD static inline float star_radius(const star *st)
     }
     mult = st->star_type == STAR_TYPE_NEUTRON_STAR ? 0.15f
            : (st->star_type == STAR_TYPE_WHITE_DWARF ? 0.2f : 1.0f);
-    return (float)(pow((double)star_unmodified_mass(st), 0.4) * st->radius_factor) * mult;
+    return (float)(wpow((wreal)star_unmodified_mass(st), (wreal)0.4) * (wreal)st->radius_factor) * mult;
 }
 
 HD static inline float star_habitable_radius(const star *st)
@@ -408,7 +430,7 @@ HD static inline float star_lifetime(const star *st)
     mass_multiplier = st->star_type == STAR_TYPE_GIANT ? 0.58 : 0.5;
     lifetime_delta = st->star_type == STAR_TYPE_WHITE_DWARF ? 10000.0
                      : (st->star_type == STAR_TYPE_NEUTRON_STAR ? 1000.0 : 0.0);
-    lifetime = 10000.0 * pow(0.1, log_base((double)um * mass_multiplier, d) + 1.0)
+    lifetime = 10000.0 * (double)wpow((wreal)0.1, log_base((wreal)((double)um * mass_multiplier), (wreal)d) + (wreal)1.0)
                * (st->lifetime_factor * 0.2 + 0.9) + lifetime_delta;
     if (star_is_birth(st))
     {

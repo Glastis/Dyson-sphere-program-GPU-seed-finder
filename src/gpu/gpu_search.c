@@ -189,6 +189,32 @@ int run_search(const cli_config *cfg, const game_desc *game, const rule_program 
         fprintf(stderr, "error: %s\n", err);
         return 1;
     }
+    {
+        /* Kernel-only micro-benchmark: `DSP_BENCH_KERNEL=<iters>` times just the
+         * scan kernel over one batch and exits, printing seeds/s. Used to measure
+         * the FP32-vs-FP64 device speedup without the CPU re-verification noise. */
+        const char *bench;
+
+        bench = getenv("DSP_BENCH_KERNEL");
+        if (bench != NULL)
+        {
+            int count;
+            int iters;
+            double secs;
+
+            count = (int)gpu_batch_size(gpu);
+            iters = atoi(bench);
+            if (iters < 1)
+            {
+                iters = 30;
+            }
+            secs = gpu_bench_kernel(gpu, cfg->seed_start, count, iters);
+            fprintf(stderr, "BENCH_KERNEL count=%d iters=%d best=%.6fs seeds_per_s=%.0f\n",
+                    count, iters, secs, (double)count / secs);
+            gpu_destroy(gpu);
+            return 0;
+        }
+    }
     progress_init(&bar, cfg);
     if (!results_open(cfg, &bar, &out))
     {

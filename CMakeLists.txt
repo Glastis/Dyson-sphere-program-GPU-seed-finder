@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.20)
 
 option(DSP_CPU_REFERENCE "Build the CPU-only reference binary (no CUDA; for tests and ground truth)" OFF)
 
+# The GPU device path runs the worldgen transcendentals in FP32 for throughput
+# (see src/worldgen/dsp_math.h, the `wreal` type). Turning this ON recompiles the
+# device in FP64 so the kernel is bit-for-bit comparable to the CPU reference --
+# used by the "GPU == CPU" exactness test to assert the kernel *logic* regardless
+# of float precision. Host code is double either way, so this only affects nvcc.
+option(DSP_FORCE_FP64_DEVICE "Compile the GPU device path in FP64 (exactness parity with the CPU reference)" OFF)
+
 project(dsp_seed_finder C)
 
 set(CMAKE_C_STANDARD 11)
@@ -12,7 +19,8 @@ set(DSP_HOST_SOURCES
     src/cli/cli.c
     src/json/conditions.c
     src/json/json_value.c
-    src/output/writer.c)
+    src/output/writer.c
+    src/output/match_tree.c)
 
 set(DSP_WARNINGS -Wall -Wextra)
 
@@ -60,7 +68,11 @@ else()
     # no change to results. See docs/perf-spatial-grid.md for the full benchmark.
     target_compile_options(dsp-seed-finder PRIVATE
         $<$<COMPILE_LANGUAGE:C>:${DSP_WARNINGS}>
-        $<$<COMPILE_LANGUAGE:CUDA>:-maxrregcount=96>)
+        $<$<COMPILE_LANGUAGE:CUDA>:-maxrregcount=96>
+        $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${DSP_FORCE_FP64_DEVICE}>>:-DDSP_FORCE_FP64_DEVICE>)
+    if(DSP_FORCE_FP64_DEVICE)
+        message(STATUS "DSP_FORCE_FP64_DEVICE=ON: GPU device path compiled in FP64 (exactness parity).")
+    endif()
     find_package(Threads REQUIRED)
     target_link_libraries(dsp-seed-finder PRIVATE Threads::Threads m)
     message(STATUS "Configured GPU build (dsp-seed-finder) for sm_120 with ${DSP_NVCC}.")

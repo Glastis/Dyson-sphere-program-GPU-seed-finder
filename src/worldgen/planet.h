@@ -39,6 +39,7 @@ typedef struct
 {
     star st;
     int planet_count;
+    int planets_ready;
     int used_theme_count;
     planet planets[MAX_PLANETS_PER_STAR];
     int used_theme_ids[MAX_PLANETS_PER_STAR];
@@ -361,6 +362,7 @@ HD static inline void get_planets(star_system *sys)
     prng_next_f64(&rng);
     prng_next_f64(&rng);
     sys->used_theme_count = 0;
+    sys->planets_ready = 1;
     st_type = sys->st.star_type;
     if (st_type == STAR_TYPE_BLACK_HOLE || st_type == STAR_TYPE_NEUTRON_STAR)
     {
@@ -378,6 +380,21 @@ HD static inline void get_planets(star_system *sys)
         return;
     }
     sys->planet_count = planets_main_seq(sys, &rng, num1);
+}
+
+/* Lazy, idempotent planet generation. get_planets only reads star s's own
+ * sub-generator (seeded from star_seeds[s]), so deferring it to the moment a
+ * planet condition is evaluated changes neither s's planets nor any other star's
+ * -- the result is bit-identical to generating eagerly. The planets_ready flag
+ * guards against generating twice (e.g. a star tested as both anchor and a
+ * proximity neighbour), which would be a needless recompute, not a wrong one. */
+HD static inline void ensure_planets(star_system *sys)
+{
+    if (sys->planets_ready)
+    {
+        return;
+    }
+    get_planets(sys);
 }
 
 #endif

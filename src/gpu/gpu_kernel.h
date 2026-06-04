@@ -16,6 +16,7 @@ gpu_context *gpu_create(const game_desc *game, const rule_program *prog, long lo
 long long gpu_batch_size(const gpu_context *ctx);
 void gpu_launch(gpu_context *ctx, int slot, long long seed_start, int count);
 void gpu_fetch(gpu_context *ctx, int slot, unsigned char *out_hits, int count);
+double gpu_bench_kernel(gpu_context *ctx, long long seed_start, int count, int iters);
 void gpu_destroy(gpu_context *ctx);
 
 #ifdef __cplusplus

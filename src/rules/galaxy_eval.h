@@ -9,7 +9,15 @@
 #include "../worldgen/planet.h"
 #include "../worldgen/planet_theme.h"
 
-HD static inline int find_matching_stars(galaxy *gx, const rule_program *prog, int *out_indexes)
+/* Scan all stars of a prepared galaxy and record every matching star index into
+ * out_indexes. When stop_at_first is set the scan returns as soon as the first
+ * match is found -- enough to answer "does this seed match at all?". This is
+ * sound because a star's verdict depends only on itself plus the FROZEN
+ * habitable prefix of earlier stars (never on later stars), so stopping early
+ * cannot change whether count > 0. The full scan (stop_at_first == 0) is what
+ * verify_seed needs: it must list the complete set of matching systems. */
+HD static inline int scan_stars(galaxy *gx, const rule_program *prog, int *out_indexes,
+                                int stop_at_first)
 {
     eval_context ctx;
     int count;
@@ -66,10 +74,20 @@ HD static inline int find_matching_stars(galaxy *gx, const rule_program *prog, i
             }
             out_indexes[count] = s;
             ++count;
+            if (stop_at_first)
+            {
+                return count;
+            }
         }
         ++s;
     }
     return count;
+}
+
+/* Full scan: lists every matching system. Used by verify_seed for reporting. */
+HD static inline int find_matching_stars(galaxy *gx, const rule_program *prog, int *out_indexes)
+{
+    return scan_stars(gx, prog, out_indexes, 0);
 }
 
 HD static inline int seed_matches(int seed, const game_desc *base_game, const rule_program *prog)
@@ -81,7 +99,8 @@ HD static inline int seed_matches(int seed, const game_desc *base_game, const ru
     game = *base_game;
     game.seed = seed;
     generate_stars(&game, &gx);
-    return find_matching_stars(&gx, prog, indexes) > 0;
+    /* Only the yes/no verdict matters here, so stop at the first match. */
+    return scan_stars(&gx, prog, indexes, 1) > 0;
 }
 
 #endif

@@ -113,7 +113,9 @@ HD static inline void galaxy_load_types(galaxy *gx)
         star_system sys;
 
         gx->habitable_prefix[index] = count;
-        sys.st = star_init(gx, index);
+        /* Pass 1 only resolves planet types / the habitable prefix, which never
+         * touch the hive sub-generator -- skip its expensive init. */
+        sys.st = star_init_ex(gx, index, 0);
         sys.planet_count = 0;
         sys.used_theme_count = 0;
         get_planets(&sys);

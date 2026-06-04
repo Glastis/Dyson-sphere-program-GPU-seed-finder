@@ -123,6 +123,52 @@ extern "C" void gpu_fetch(gpu_context *ctx, int slot, unsigned char *out_hits, i
     memcpy(out_hits, ctx->h_hits[slot], (size_t)count);
 }
 
+/* Benchmark helper: time ONLY the scan kernel (no D2H copy, no CPU verify) over
+ * a [seed_start, seed_start+count) range, averaged over `iters` launches, using
+ * CUDA events. Returns the best (minimum) per-iteration kernel time in seconds.
+ * This isolates pure device throughput from the CPU re-verification cost, which
+ * otherwise dominates the wall time on dense rulesets and masks the FP32 kernel
+ * speedup we want to measure (build once in FP32, once with DSP_FORCE_FP64_DEVICE,
+ * compare the two best times). Gated behind the DSP_BENCH_KERNEL env var. */
+extern "C" double gpu_bench_kernel(gpu_context *ctx, long long seed_start, int count, int iters)
+{
+    cudaEvent_t beg;
+    cudaEvent_t end;
+    int blocks;
+    double best;
+    int it;
+
+    blocks = (count + GPU_BLOCK - 1) / GPU_BLOCK;
+    cudaEventCreate(&beg);
+    cudaEventCreate(&end);
+    best = 1e30;
+    /* one warmup launch (JIT, caches, clocks) excluded from the timing */
+    scan_kernel<<<blocks, GPU_BLOCK, 0, ctx->streams[0]>>>(seed_start, count, ctx->d_game,
+                                                           ctx->d_prog, ctx->d_hits[0]);
+    cudaStreamSynchronize(ctx->streams[0]);
+    it = 0;
+    while (it < iters)
+    {
+        float ms;
+
+        cudaEventRecord(beg, ctx->streams[0]);
+        scan_kernel<<<blocks, GPU_BLOCK, 0, ctx->streams[0]>>>(seed_start, count, ctx->d_game,
+                                                               ctx->d_prog, ctx->d_hits[0]);
+        cudaEventRecord(end, ctx->streams[0]);
+        gpu_fatal_if_error(cudaEventSynchronize(end), "bench kernel");
+        ms = 0.0f;
+        cudaEventElapsedTime(&ms, beg, end);
+        if ((double)ms / 1000.0 < best)
+        {
+            best = (double)ms / 1000.0;
+        }
+        ++it;
+    }
+    cudaEventDestroy(beg);
+    cudaEventDestroy(end);
+    return best;
+}
+
 extern "C" void gpu_destroy(gpu_context *ctx)
 {
     int slot;

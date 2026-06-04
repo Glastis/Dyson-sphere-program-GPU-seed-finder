@@ -32,17 +32,23 @@ file:
 ./dsp-seed-finder conditions.json
 ```
 
-It prints the first matching seeds and the systems that matched (`seed`, then the
-matching star indexes under `systems` — for a proximity rule, the whole
-constellation: the anchor first, then one index per `systems[]` entry):
+For each matching seed it prints a tree that mirrors your rule — one system per
+branch, one condition per leaf, each annotated with its measured value, so you
+can compare seeds at a glance instead of flying blind:
 
 ```
-5457	4
-14927	59
-26150	59
+◆ 89,808                                      proximité ≤ 8 ly
+├─ départ                                     #0   G   0.0 ly
+├─ ET                                         #58  O   5.7 ly
+│  ├─ océan                                   Sulfur
+│  ├─ gaz Fireice                             0.70 /s
+│  ├─ veine Stalagmite                        2.06 m
+│  └─ veine Organic                           2.06 m
+└─ veine Magnet                               #63  BH  6.1 ly · 3.11 m
 ```
 
-That's it. Open one of those seeds in the game and the system is there.
+That's it. Open one of those seeds in the game and the systems are there. For
+machine-readable output use `--format json` (structured) or `--format csv`.
 
 ---
 

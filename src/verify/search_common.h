@@ -93,29 +93,6 @@ static inline void search_state_init(search_state *state, const cli_config *cfg,
              results_extension(cfg->format));
 }
 
-static inline void format_match_stars(char *buf, size_t n, const match_record *rec)
-{
-    int out;
-    int i;
-
-    out = 0;
-    buf[0] = '\0';
-    i = 0;
-    while (i < rec->index_count && (size_t)out < n - 8)
-    {
-        if (i > 0)
-        {
-            str_app(buf, n, &out, ", ");
-        }
-        out += snprintf(buf + out, n - (size_t)out, "%d", rec->indexes[i]);
-        ++i;
-    }
-    if (i < rec->index_count)
-    {
-        snprintf(buf + out, n - (size_t)out, " +%d", rec->index_count - i);
-    }
-}
-
 static inline void open_spill(search_state *state)
 {
     int i;
@@ -168,8 +145,6 @@ static inline void emit_match_sink(search_state *state, const match_record *rec)
 
 static inline void emit_match(search_state *state, const match_record *rec)
 {
-    char stars[24];
-
     pthread_mutex_lock(&state->out_mutex);
     if (state->max_seeds == 0 || state->found < state->max_seeds)
     {
@@ -177,8 +152,11 @@ static inline void emit_match(search_state *state, const match_record *rec)
         atomic_store(&state->last_match, rec->seed);
         if (state->panel != NULL && !state->panel->is_plain)
         {
-            format_match_stars(stars, sizeof(stars), rec);
-            progress_push_match(state->panel, rec->seed, stars);
+            mt_line lines[MT_MAX_LINES];
+            int count;
+
+            count = match_tree_render(rec, state->game, state->prog, lines, MT_MAX_LINES);
+            progress_push_block(state->panel, lines, count);
         }
         emit_match_sink(state, rec);
         if (state->max_seeds != 0 && state->found >= state->max_seeds)
@@ -235,8 +213,8 @@ static inline void results_summary(const search_state *state)
     }
     if (state->spill_open)
     {
-        fprintf(stderr, "%lld matches \xe2\x80\x94 full list written to %s (last %d shown above).\n",
-                state->found, state->spill_path, PROGRESS_WINDOW);
+        fprintf(stderr, "%lld matches \xe2\x80\x94 full list written to %s (most recent shown above).\n",
+                state->found, state->spill_path);
     }
     else
     {

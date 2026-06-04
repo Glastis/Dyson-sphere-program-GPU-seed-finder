@@ -1,0 +1,16 @@
+{
+    "game": {
+        "starCount": 64,
+        "resourceMultiplier": 1.0,
+        "hiveInitialColonize": 1.0,
+        "hiveMaxDensity": 1.0
+    },
+    "rule": {
+        "type": "and",
+        "rules": [
+            { "type": "planetCount", "op": "gte", "value": 5 },
+            { "type": "gasCount", "op": "gte", "value": 1 },
+            { "type": "satelliteCount", "op": "gte", "value": 1 }
+        ]
+    }
+}
